@@ -42,9 +42,63 @@ void secondsSplit( uint32_t seconds, uint16_t * days, uint8_t * hours, uint8_t *
   *sec     = seconds;
 }
 
+char * dayAddition(uint16_t num) {
+  uint16_t preLastDigit = num % 100 / 10;
+  if (preLastDigit == 1) {
+    return "дней";
+  }
+
+  switch (num % 10) {
+    case 1:
+      return "день";
+    case 2:
+    case 3:
+    case 4:
+      return "дня";
+    default:
+      return "дней";
+  }
+}
 
 //  (true)  days 00:00:00 .. 23:59:59
 //  (false) days 00:00 ..    23:59
+char * seconds2durationRu(uint32_t seconds, bool displaySeconds = false)
+{
+  char * buf = __dateTimeHelperBuffer;
+
+  uint16_t days;
+  uint8_t hours, minutes, sec;
+  secondsSplit(seconds, &days, &hours, &minutes, &sec);
+
+  uint8_t pos = 0;
+  itoa(days, buf, 10);
+  pos = strlen(buf);
+  char * addition = dayAddition(days);
+  buf[pos++]  = ' ';
+  strcpy(buf + pos, addition);
+  pos += strlen(addition);
+  buf[pos++]  = ' ';
+
+  uint8_t t = hours / 10;
+  buf[pos++] = t + '0';
+  buf[pos++] = hours - (t * 10) + '0';
+  buf[pos++]  = ':';
+
+  t = minutes / 10;
+  buf[pos++] = t + '0';
+  buf[pos++] = minutes - (t * 10) + '0';
+  if (displaySeconds)
+  {
+    buf[pos++]  = ':';
+    t = sec / 10;
+    buf[pos++] = t + '0';
+    buf[pos++] = sec - (t * 10) + '0';
+  }
+  buf[pos]  = '\0';
+
+  return buf;
+}
+
 char * seconds2duration(uint32_t seconds, bool displaySeconds = false)
 {
   char * buf = __dateTimeHelperBuffer;
@@ -82,7 +136,6 @@ char * seconds2duration(uint32_t seconds, bool displaySeconds = false)
 
   return buf;
 }
-
 
 //  (true)   00:00:00 .. 23:59:59
 //  (false)  00:00 ..    23:59

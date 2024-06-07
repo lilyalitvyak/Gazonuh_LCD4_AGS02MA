@@ -10,15 +10,18 @@
 #include "DYPlayerArduino.h"
 
 #define CONSOLE_IP "192.168.0.36"
-#define CONSOLE_PORT 8273
+#define CONSOLE_PORT 8277
 
 AGS02MA AGS(26);
 LiquidCrystal_I2C lcd(0x27, 20, 4);
 WiFiUDP Udp;
 DY::Player player;
+WiFiServer server(8087);
 
 unsigned int ss=0; // seconds
 unsigned long lastTick=millis(); // time that the clock last "ticked"
+unsigned int ssRu=0; // seconds
+unsigned long lastTickRu=millis(); // time that the clock last "ticked"
 
 const char* ssid = "Tenda_AX3000_2G";
 const char* password = "TarakanovnaMojaTarakanovna";
@@ -26,11 +29,18 @@ unsigned long previousMillis = 0;
 unsigned long interval = 30000;
 int version, resist;
 bool alarmTrigger = false;
+float percentageDifference;
 
 const int relayPin = 33;
 uint32_t indexMeasarray = 0;
 uint32_t arrayLength = 5000;
 uint32_t arrayOfMeasurements[5000];
+
+// Web server
+String header;
+unsigned long currentTime = millis();
+unsigned long previousTime = 0; 
+const long timeoutTime = 2000;
 
 void setup()
 {
@@ -43,6 +53,7 @@ void setup()
   Wire.begin();
 
   connecToWiFi();
+  server.begin();
 
   pinMode(relayPin, OUTPUT);
   digitalWrite(relayPin, HIGH);
@@ -101,6 +112,7 @@ void loop()
   checkWiFi();
 
   sendUdp(buildString("PPB: ", ppbValue));
+
   if (checkOverload(ppbValue)) {
     if (!alarmTrigger) {
       playAlarm();
@@ -117,6 +129,8 @@ void loop()
     digitalWrite(relayPin, HIGH);
     Serial.println("-------->");
   }
+
+  webServer(ppbValue);
 }
 
 uint8_t countDigits(int num)
@@ -176,6 +190,16 @@ char * uptimes() {
   return "-";
 }
 
+char * uptimesRu() {
+  unsigned long millisPassed = millis() - lastTickRu;
+  if (millisPassed >= 1000UL) {
+    lastTickRu += millisPassed;
+    ssRu=(lastTickRu/1000UL);
+    return seconds2durationRu(ssRu, true);
+  }
+  return "-";
+}
+
 bool checkOverload(uint32_t ppbValue) {
   if (indexMeasarray < arrayLength) {
       Serial.println("-----> Накопление данных.");
@@ -223,7 +247,7 @@ bool checkOverload(uint32_t ppbValue) {
       Serial.print("Recent 20 average: ");
       Serial.println(averageRecent);
 
-      float percentageDifference = ((float)averageRecent/(float)averageСomplete) * 100 - 100;
+      percentageDifference = ((float)averageRecent/(float)averageСomplete) * 100 - 100;
       Serial.print("Превышение: ");
       Serial.print(percentageDifference);
       Serial.println("%");
@@ -263,6 +287,34 @@ String buildString(char* literal, uint32_t number) {
     return out;
 }
 
+String buildString(char* literal) {
+    uint8_t literalSize = strlen(literal);
+    char buf[literalSize];
+    strcpy(buf, literal);
+    String out = buf;
+    return out;
+}
+
+String buildString(uint32_t number) {
+    uint8_t numberSize = countDigits(number);
+    char buf[numberSize];
+    char buffer [numberSize];
+    char* append = itoa(number, buffer, 10);
+    strcpy(buf, append);
+    String out = buf;
+    return out;
+}
+
+String buildString(float number) {
+    uint8_t numberSize = countDigits(number);
+    char buf[numberSize];
+    char buffer [numberSize];
+    char* append = itoa(number, buffer, 10);
+    strcpy(buf, append);
+    String out = buf;
+    return out;
+}
+
 String buildString(char* literal, float number, char* suffix) {
     uint8_t literalSize = strlen(literal);
     uint8_t numberSize = countDigits(number);
@@ -283,4 +335,75 @@ void sendUdp(String str) {
   Serial.println(str.c_str());
   Udp.printf(str.c_str(),str.length());
   Udp.endPacket();
+}
+
+void webServer(uint32_t ppbValue) {
+  WiFiClient client = server.available();   // Listen for incoming clients
+
+  if (client) {                             // If a new client connects,
+    currentTime = millis();
+    previousTime = currentTime;
+    Serial.println("New Client.");          // print a message out in the serial port
+    String currentLine = "";                // make a String to hold incoming data from the client
+    while (client.connected() && currentTime - previousTime <= timeoutTime) {  // loop while the client's connected
+      currentTime = millis();
+      if (client.available()) {             // if there's bytes to read from the client,
+        char c = client.read();             // read a byte, then
+        Serial.write(c);                    // print it out the serial monitor
+        header += c;
+        if (c == '\n') {                    // if the byte is a newline character
+          // if the current line is blank, you got two newline characters in a row.
+          // that's the end of the client HTTP request, so send a response:
+          if (currentLine.length() == 0) {
+            // HTTP headers always start with a response code (e.g. HTTP/1.1 200 OK)
+            // and a content-type so the client knows what's coming, then a blank line:
+            client.println("HTTP/1.1 200 OK");
+            client.println("Content-type:text/html");
+            client.println("Connection: close");
+            client.println();
+            
+            // Display the HTML web page
+            client.println("<!DOCTYPE html><html>");
+            client.println("<head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">");
+            client.println("<meta content=\"text/html;charset=utf-8\" http-equiv=\"Content-Type\">");
+            client.println("<link rel=\"icon\" href=\"data:,\">");
+            // CSS to style the on/off buttons 
+            // Feel free to change the background-color and font-size attributes to fit your preferences
+            client.println("<style>html { font-family: Helvetica; display: inline-block; margin: 0px auto; text-align: center;}");
+            client.println(".button { background-color: #4CAF50; border: none; color: white; padding: 16px 40px;");
+            client.println("text-decoration: none; font-size: 30px; margin: 2px; cursor: pointer;}");
+            client.println(".button2 {background-color: #555555;}</style></head>");
+            
+            // Web Page Heading
+            client.println("<body><h1>Газонюх</h1>");
+
+            client.println("<p>PPB: " + buildString(ppbValue) + "</p>");
+            
+            if (indexMeasarray < arrayLength) { 
+              client.println("<p>Накопление данных " + buildString(indexMeasarray) + " из " + buildString(arrayLength) + "</p>");
+            } else {
+              client.println("<p>Превышение " + buildString(percentageDifference) + "%</p>");
+            } 
+            client.println("<p>Время работы " + buildString(uptimesRu()) + "</p>");
+            client.println("</body></html>");
+            
+            // The HTTP response ends with another blank line
+            client.println();
+            // Break out of the while loop
+            break;
+          } else { // if you got a newline, then clear currentLine
+            currentLine = "";
+          }
+        } else if (c != '\r') {  // if you got anything else but a carriage return character,
+          currentLine += c;      // add it to the end of the currentLine
+        }
+      }
+    }
+    // Clear the header variable
+    header = "";
+    // Close the connection
+    client.stop();
+    Serial.println("Client disconnected.");
+    Serial.println("");
+  }
 }
