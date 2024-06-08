@@ -1,6 +1,6 @@
 #include "AGS02MA.h"
 #include "GazoTimeHelpers.h"
-#include <LiquidCrystal_I2C.h>
+//#include <LiquidCrystal_I2C.h>
 #include <WebServer.h>
 #include <WiFi.h>
 #include <WiFiUdp.h>
@@ -8,15 +8,19 @@
 #include "esp_adc_cal.h"
 #include <Arduino.h>
 #include "DYPlayerArduino.h"
+//Тип подключения дисплея: 1 - по шине I2C, 2 - десятиконтактное. Обязательно указывать ДО подключения библиотеки
+//Если этого не сделать, при компиляции возникнет ошибка: "LCD type connect has not been declared"
+#define _LCD_TYPE 1
+#include <LCD_1602_RUS_ALL.h>
 
 #define CONSOLE_IP "192.168.0.36"
-#define CONSOLE_PORT 8277
+#define CONSOLE_PORT 8275
 
 AGS02MA AGS(26);
-LiquidCrystal_I2C lcd(0x27, 20, 4);
+LCD_1602_RUS lcd(0x27, 20, 4);
 WiFiUDP Udp;
 DY::Player player;
-WiFiServer server(8087);
+WiFiServer server(8085);
 
 unsigned int ss=0; // seconds
 unsigned long lastTick=millis(); // time that the clock last "ticked"
@@ -60,7 +64,7 @@ void setup()
 
   lcd.init();
 	lcd.backlight();
-	lcd.print("Start!");
+	lcd.print("Старт!");
 
   initAGS02MA();
   initPlayer();
@@ -96,18 +100,15 @@ void loop()
   Serial.println("-------->");
   delay(1000);
   uint32_t ppbValue = AGS.readPPB();
-  char * uptime = uptimes();
+  char * uptime = uptimesRu();
 
-  lcd.clear();
+  //lcd.clear();
   lcd.setCursor(0,0); 
   lcd.print("PPB: ");
-  lcd.print(ppbValue);
-  lcd.setCursor(0,3);
-  lcd.print(uptime); 
+  lcd.print(buildString(ppbValue));
+  lcd.print("     ");
   Serial.print("PPB: ");
   Serial.print(ppbValue);
-  Serial.print(", Uptime: ");
-  Serial.println(uptime);
 
   checkWiFi();
 
@@ -130,7 +131,13 @@ void loop()
     Serial.println("-------->");
   }
 
-  webServer(ppbValue);
+  lcd.setCursor(0,3);
+  lcd.print(buildString(uptime));
+  lcd.print("    ");
+  Serial.print("Uptime: ");
+  Serial.println(uptime);
+
+  webServer(ppbValue, uptime);
 }
 
 uint8_t countDigits(int num)
@@ -202,17 +209,18 @@ char * uptimesRu() {
 
 bool checkOverload(uint32_t ppbValue) {
   if (indexMeasarray < arrayLength) {
-      Serial.println("-----> Накопление данных.");
+      Serial.println("-----> Сбор данных.");
       Serial.print("Append index: ");
       Serial.println(indexMeasarray);
       Serial.print("Append value: ");
       Serial.println(ppbValue);
       lcd.setCursor(0,1);
-      lcd.print("Nakoplenie dannyh: "); 
+      lcd.print("Сбор данных: "); 
       lcd.setCursor(0,2);
-      lcd.print(indexMeasarray);
-      lcd.print(" iz ");
-      lcd.print(arrayLength);
+      lcd.print(buildString(indexMeasarray));
+      lcd.print(" из ");
+      lcd.print(buildString(arrayLength));
+      lcd.print("     ");
       if (ppbValue > 0) {
         arrayOfMeasurements[indexMeasarray] = {ppbValue};
         indexMeasarray++;
@@ -253,9 +261,12 @@ bool checkOverload(uint32_t ppbValue) {
       Serial.println("%");
 
       lcd.setCursor(0,1);
-      lcd.print("Prevyshenie: "); 
-      lcd.print(percentageDifference);
+      lcd.print("Превышение: "); 
+      lcd.print(buildString(percentageDifference));
       lcd.print("%"); 
+      lcd.print("     "); 
+      lcd.setCursor(0,2);
+      lcd.print("                    ");
 
       sendUdp(buildString("Prevyshenie: ", percentageDifference, "%%"));
 
@@ -306,24 +317,24 @@ String buildString(uint32_t number) {
 }
 
 String buildString(float number) {
-    uint8_t numberSize = countDigits(number);
+    uint8_t numberSize = countDigits(number) + 3;
     char buf[numberSize];
     char buffer [numberSize];
-    char* append = itoa(number, buffer, 10);
-    strcpy(buf, append);
+    dtostrf(number, numberSize, 2, buffer);
+    strcpy(buf, buffer);
     String out = buf;
     return out;
 }
 
 String buildString(char* literal, float number, char* suffix) {
     uint8_t literalSize = strlen(literal);
-    uint8_t numberSize = countDigits(number);
+    uint8_t numberSize = countDigits(number) + 3;
     uint8_t suffixSize = strlen(suffix);
     char buf[numberSize+literalSize+suffixSize];
     char buffer [numberSize];
-    char* append = itoa(number, buffer, 10);
+    char* append = dtostrf(number, numberSize, 2, buffer);
     strcpy(buf, literal);
-    strcpy(buf + literalSize, append);
+    strcpy(buf + literalSize, buffer);
     strcpy(buf + literalSize + numberSize, suffix);
     String out = buf;
     return out;
@@ -337,7 +348,7 @@ void sendUdp(String str) {
   Udp.endPacket();
 }
 
-void webServer(uint32_t ppbValue) {
+void webServer(uint32_t ppbValue, char * uptime) {
   WiFiClient client = server.available();   // Listen for incoming clients
 
   if (client) {                             // If a new client connects,
@@ -380,11 +391,11 @@ void webServer(uint32_t ppbValue) {
             client.println("<p>PPB: " + buildString(ppbValue) + "</p>");
             
             if (indexMeasarray < arrayLength) { 
-              client.println("<p>Накопление данных " + buildString(indexMeasarray) + " из " + buildString(arrayLength) + "</p>");
+              client.println("<p>Сбор данных " + buildString(indexMeasarray) + " из " + buildString(arrayLength) + "</p>");
             } else {
               client.println("<p>Превышение " + buildString(percentageDifference) + "%</p>");
             } 
-            client.println("<p>Время работы " + buildString(uptimesRu()) + "</p>");
+            client.println("<p>Время работы " + buildString(uptime) + "</p>");
             client.println("</body></html>");
             
             // The HTTP response ends with another blank line
@@ -407,3 +418,4 @@ void webServer(uint32_t ppbValue) {
     Serial.println("");
   }
 }
+
