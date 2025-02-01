@@ -42,7 +42,7 @@ void secondsSplit( uint32_t seconds, uint16_t * days, uint8_t * hours, uint8_t *
   *sec     = seconds;
 }
 
-char * dayAddition(uint16_t num) {
+const char * dayAddition(uint16_t num) {
   uint16_t preLastDigit = num % 100 / 10;
   if (preLastDigit == 1) {
     return "дней";
@@ -73,7 +73,7 @@ char * seconds2durationRu(uint32_t seconds, bool displaySeconds = false)
   uint8_t pos = 0;
   itoa(days, buf, 10);
   pos = strlen(buf);
-  char * addition = dayAddition(days);
+  const char * addition = dayAddition(days);
   buf[pos++]  = ' ';
   strcpy(buf + pos, addition);
   pos += strlen(addition);

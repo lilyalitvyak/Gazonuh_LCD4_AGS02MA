@@ -1,0 +1,16 @@
+{
+    "idf.port": "/dev/tty.wchusbserial142110",
+    "idf.flashType": "UART",
+    "files.associations": {
+        "array": "c",
+        "deque": "c",
+        "string": "c",
+        "unordered_map": "c",
+        "unordered_set": "c",
+        "vector": "c",
+        "string_view": "c",
+        "initializer_list": "c",
+        "functional": "cpp"
+    },
+    "C_Cpp.errorSquiggles": "disabled"
+}

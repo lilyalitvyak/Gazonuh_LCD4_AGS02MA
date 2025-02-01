@@ -1,12 +1,12 @@
 #include "AGS02MA.h"
 #include "GazoTimeHelpers.h"
-//#include <LiquidCrystal_I2C.h>
+#include "Gazonuh_LCD4_AGS02MA.h"
+//#include "GNWebServer.h"
 #include <WebServer.h>
 #include <WiFi.h>
 #include <WiFiUdp.h>
 #include <driver/adc.h>
 #include "esp_adc_cal.h"
-#include <Arduino.h>
 #include "DYPlayerArduino.h"
 //Тип подключения дисплея: 1 - по шине I2C, 2 - десятиконтактное. Обязательно указывать ДО подключения библиотеки
 //Если этого не сделать, при компиляции возникнет ошибка: "LCD type connect has not been declared"
@@ -21,6 +21,7 @@ LCD_1602_RUS lcd(0x27, 20, 4);
 WiFiUDP Udp;
 DY::Player player;
 WiFiServer server(8085);
+//GNWebServer gnserver;
 
 unsigned int ss=0; // seconds
 unsigned long lastTick=millis(); // time that the clock last "ticked"
@@ -34,8 +35,10 @@ unsigned long interval = 30000;
 int version, resist;
 bool alarmTrigger = false;
 float percentageDifference;
+bool needRedirect = false;
+bool alarmEnabled = false;
 
-const int relayPin = 33;
+const int relayPin = 25;
 uint32_t indexMeasarray = 0;
 uint32_t arrayLength = 5000;
 uint32_t arrayOfMeasurements[5000];
@@ -112,11 +115,13 @@ void loop()
 
   checkWiFi();
 
-  sendUdp(buildString("PPB: ", ppbValue));
+  sendUdp(buildString((char *)"PPB: ", ppbValue));
 
   if (checkOverload(ppbValue)) {
     if (!alarmTrigger) {
-      playAlarm();
+      if (alarmEnabled) {
+        playAlarm();
+      }
       alarmTrigger = true;
     }
     Serial.println("-------->");
@@ -138,11 +143,7 @@ void loop()
   Serial.println(uptime);
 
   webServer(ppbValue, uptime);
-}
-
-uint8_t countDigits(int num)
-{
-   return((num<0?2:1)+(int8_t)log10(abs(num))) ;
+  //gnserver.update(ppbValue, uptime);
 }
 
 void connecToWiFi() {
@@ -194,7 +195,7 @@ char * uptimes() {
     ss=(lastTick/1000UL);
     return seconds2duration(ss, true);
   }
-  return "-";
+  return (char *)"-";
 }
 
 char * uptimesRu() {
@@ -204,7 +205,7 @@ char * uptimesRu() {
     ssRu=(lastTickRu/1000UL);
     return seconds2durationRu(ssRu, true);
   }
-  return "-";
+  return (char *)"-";
 }
 
 bool checkOverload(uint32_t ppbValue) {
@@ -234,7 +235,7 @@ bool checkOverload(uint32_t ppbValue) {
         i++;
         fullData += arrayOfMeasurements[i];
       }
-      uint32_t averageСomplete = fullData/indexMeasarray;
+      uint32_t averageComplete = fullData/indexMeasarray;
       arrayOfMeasurements[indexMeasarray-1] = {ppbValue};
       Serial.print("Overload append index: ");
       Serial.println(indexMeasarray);
@@ -244,7 +245,7 @@ bool checkOverload(uint32_t ppbValue) {
       Serial.print("Overload, array 0: ");
       Serial.println(arrayOfMeasurements[0]);
       Serial.print("Average full: ");
-      Serial.println(averageСomplete);
+      Serial.println(averageComplete);
       uint32_t recentData = 0;
       uint32_t recentValues = indexMeasarray - 20;
       while (recentValues < indexMeasarray) {
@@ -255,7 +256,7 @@ bool checkOverload(uint32_t ppbValue) {
       Serial.print("Recent 20 average: ");
       Serial.println(averageRecent);
 
-      percentageDifference = ((float)averageRecent/(float)averageСomplete) * 100 - 100;
+      percentageDifference = ((float)averageRecent/(float)averageComplete) * 100 - 100;
       Serial.print("Превышение: ");
       Serial.print(percentageDifference);
       Serial.println("%");
@@ -268,9 +269,12 @@ bool checkOverload(uint32_t ppbValue) {
       lcd.setCursor(0,2);
       lcd.print("                    ");
 
-      sendUdp(buildString("Prevyshenie: ", percentageDifference, "%%"));
+      sendUdp(buildString((char *)"Prevyshenie: ", percentageDifference, (char *)"%%"));
 
-      return percentageDifference > 30 || (percentageDifference > 10 && alarmTrigger);
+      return percentageDifference > 30 || // Превышение более 30% от среднего за последние 5000 замеров
+      (ppbValue > 80 && alarmTrigger) || // Превышение больше 80 и вытяжкка включена
+      (ppbValue > 100  && !alarmTrigger) || // Превышение больше 100 и вытяжкка выключена
+      (percentageDifference > 10 && alarmTrigger); // Превышение более 10% работающая вытяжка
   }
 }
 
@@ -286,66 +290,18 @@ void checkWiFi() {
   }
 }
 
-String buildString(char* literal, uint32_t number) {
-    uint8_t numberSize = countDigits(number);
-    uint8_t literalSize = strlen(literal);
-    char buf[numberSize+literalSize];
-    char buffer [numberSize];
-    char* append = itoa(number, buffer, 10);
-    strcpy(buf, literal);
-    strcpy(buf + literalSize, append);
-    String out = buf;
-    return out;
-}
-
-String buildString(char* literal) {
-    uint8_t literalSize = strlen(literal);
-    char buf[literalSize];
-    strcpy(buf, literal);
-    String out = buf;
-    return out;
-}
-
-String buildString(uint32_t number) {
-    uint8_t numberSize = countDigits(number);
-    char buf[numberSize];
-    char buffer [numberSize];
-    char* append = itoa(number, buffer, 10);
-    strcpy(buf, append);
-    String out = buf;
-    return out;
-}
-
-String buildString(float number) {
-    uint8_t numberSize = countDigits(number) + 3;
-    char buf[numberSize];
-    char buffer [numberSize];
-    dtostrf(number, numberSize, 2, buffer);
-    strcpy(buf, buffer);
-    String out = buf;
-    return out;
-}
-
-String buildString(char* literal, float number, char* suffix) {
-    uint8_t literalSize = strlen(literal);
-    uint8_t numberSize = countDigits(number) + 3;
-    uint8_t suffixSize = strlen(suffix);
-    char buf[numberSize+literalSize+suffixSize];
-    char buffer [numberSize];
-    char* append = dtostrf(number, numberSize, 2, buffer);
-    strcpy(buf, literal);
-    strcpy(buf + literalSize, buffer);
-    strcpy(buf + literalSize + numberSize, suffix);
-    String out = buf;
-    return out;
-}
-
 void sendUdp(String str) {
   Udp.beginPacket(CONSOLE_IP, CONSOLE_PORT);
   Serial.print("Send udp: ");
   Serial.println(str.c_str());
   Udp.printf(str.c_str(),str.length());
   Udp.endPacket();
+}
+
+void reloadLCD() {
+  Serial.println("\nreloadLCD");
+  lcd.clear();
+  lcd.init();
 }
 
 void webServer(uint32_t ppbValue, char * uptime) {
@@ -372,16 +328,21 @@ void webServer(uint32_t ppbValue, char * uptime) {
             client.println("Content-type:text/html");
             client.println("Connection: close");
             client.println();
-            
+
             // Display the HTML web page
             client.println("<!DOCTYPE html><html>");
             client.println("<head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">");
             client.println("<meta content=\"text/html;charset=utf-8\" http-equiv=\"Content-Type\">");
             client.println("<link rel=\"icon\" href=\"data:,\">");
+
+            if (needRedirect) {
+              client.print("<meta http-equiv=\"refresh\" content=\"0;url=/\">");
+              needRedirect = false;
+            }
             // CSS to style the on/off buttons 
             // Feel free to change the background-color and font-size attributes to fit your preferences
             client.println("<style>html { font-family: Helvetica; display: inline-block; margin: 0px auto; text-align: center;}");
-            client.println(".button { background-color: #4CAF50; border: none; color: white; padding: 16px 40px;");
+            client.println(".button { background-color: #4CAF50; border: none; color: white; padding: 16px 40px; position:relative; border-radius: 4px; bottom: 5%;}");
             client.println("text-decoration: none; font-size: 30px; margin: 2px; cursor: pointer;}");
             client.println(".button2 {background-color: #555555;}</style></head>");
             
@@ -396,6 +357,12 @@ void webServer(uint32_t ppbValue, char * uptime) {
               client.println("<p>Превышение " + buildString(percentageDifference) + "%</p>");
             } 
             client.println("<p>Время работы " + buildString(uptime) + "</p>");
+            client.println("<p><a href=\"/reload_lcd\"><button class=\"button\">Перезапуск экрана</button></a></p>");
+            if (alarmEnabled) {
+                client.println("<p><a href=\"/alarm_disable\"><button class=\"button\">Выключить оповещение</button></a></p>");
+            } else {
+                client.println("<p><a href=\"/alarm_enable\"><button class=\"button\">Включить оповещение</button></a></p>");
+            }
             client.println("</body></html>");
             
             // The HTTP response ends with another blank line
@@ -407,6 +374,17 @@ void webServer(uint32_t ppbValue, char * uptime) {
           }
         } else if (c != '\r') {  // if you got anything else but a carriage return character,
           currentLine += c;      // add it to the end of the currentLine
+        }
+
+        if (currentLine.endsWith("GET /reload_lcd")) {
+            reloadLCD();
+            needRedirect = true;
+        } else if (currentLine.endsWith("GET /alarm_disable")) {
+            alarmEnabled = false;
+            needRedirect = true;
+        } else if (currentLine.endsWith("GET /alarm_enable")) {
+            alarmEnabled = true;
+            needRedirect = true;
         }
       }
     }
